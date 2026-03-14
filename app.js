@@ -1,3 +1,22 @@
+// ==================== GOOGLE API CALLBACKS (DEBEN ESTAR PRIMERO) ====================
+
+// Estas funciones deben estar en el scope global ANTES de que se carguen los scripts
+window.gapiLoaded = function() {
+    gapi.load('client', initializeGapiClient);
+};
+
+window.gisLoaded = function() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        scope: CONFIG.SCOPES,
+        callback: '', // Se define después
+    });
+    gisInited = true;
+    maybeEnableButtons();
+};
+
+// ==================== ESTADO GLOBAL ====================
+
 // Estado global
 let expenses = [];
 let currentUser = null;
@@ -12,10 +31,6 @@ let isListening = false;
 
 // ==================== GOOGLE API INITIALIZATION ====================
 
-function gapiLoaded() {
-    gapi.load('client', initializeGapiClient);
-}
-
 async function initializeGapiClient() {
     try {
         await gapi.client.init({
@@ -28,16 +43,6 @@ async function initializeGapiClient() {
         console.error('Error inicializando GAPI client:', error);
         showAlert('Error al inicializar Google API', 'error');
     }
-}
-
-function gisLoaded() {
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: CONFIG.SCOPES,
-        callback: '', // Se define después
-    });
-    gisInited = true;
-    maybeEnableButtons();
 }
 
 function maybeEnableButtons() {
@@ -878,7 +883,3 @@ window.addEventListener('load', () => {
     // Intentar habilitar botones (por si los APIs ya están listos)
     maybeEnableButtons();
 });
-
-// Cargar Google API
-window.gapiLoaded = gapiLoaded;
-window.gisLoaded = gisLoaded;
