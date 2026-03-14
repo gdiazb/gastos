@@ -321,6 +321,7 @@ function cancelVoiceConfirmation() {
 
 function addVoiceExpenses(items) {
     const today = new Date().toISOString().split('T')[0];
+    const token = localStorage.getItem('googleIdToken');
     
     items.forEach(item => {
         const expense = {
@@ -328,11 +329,22 @@ function addVoiceExpenses(items) {
             category: guessCategory(item.concept),
             description: item.concept,
             amount: item.amount,
-            paidBy: 'Yo',
+            paidBy: item.paidBy,
             id: Date.now().toString() + Math.random()
         };
         
         expenses.unshift(expense);
+        
+        // Intentar escribir en Google Sheets si hay token
+        if (token && currentUser) {
+            try {
+                writeToGoogleSheets(expense, token).catch(error => {
+                    console.warn('No se pudo sincronizar con Sheets', error);
+                });
+            } catch (error) {
+                console.warn('Error al intentar escribir en Sheets', error);
+            }
+        }
     });
 
     saveDataToLocalStorage();
@@ -409,17 +421,22 @@ function handleCredentialResponse(response) {
     const user = JSON.parse(jsonPayload);
     currentUser = user.email;
     
+    // GUARDAR el token en localStorage para usarlo después
+    localStorage.setItem('googleIdToken', response.credential);
+    
     document.getElementById('userEmail').textContent = currentUser;
     document.getElementById('signoutBtn').style.display = 'inline-block';
     document.getElementById('buttonDiv').style.display = 'none';
 
     // Inicializar API después de autenticarse
     initializeGoogleAPI(response.credential);
+    
+    showAlert(`✅ Bienvenido ${currentUser}`, 'success');
 }
 
 function initializeGoogleAPI(token) {
-    // Aquí se inicializaría la API de Google Sheets
-    // Para esta versión, usaremos una alternativa sin backend
+    // Guardar token para usar en writeToGoogleSheets
+    localStorage.setItem('googleIdToken', token);
     
     // Intenta cargar datos si es posible
     if (typeof gapi !== 'undefined' && gapi.client) {
@@ -447,6 +464,53 @@ if (signoutBtn) {
 }
 
 // ==================== GOOGLE SHEETS API ====================
+
+// Función para escribir en Google Sheets
+async function writeToGoogleSheets(expense, token) {
+    try {
+        if (!CONFIG.SPREADSHEET_ID || CONFIG.SPREADSHEET_ID === "TU_ID_AQUI") {
+            console.warn("SPREADSHEET_ID no configurado, guardando solo en localStorage");
+            return false;
+        }
+
+        // Preparar datos para escribir
+        const values = [[
+            expense.date,
+            expense.category,
+            expense.description,
+            expense.amount,
+            expense.paidBy,
+            expense.id
+        ]];
+
+        // Usar Google Sheets API para agregar la fila
+        const response = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.SHEET_NAME}!A:F:append?valueInputOption=RAW&key=${CONFIG.GOOGLE_API_KEY || ''}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    values: values
+                })
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Gasto escrito en Google Sheets');
+            return true;
+        } else {
+            const error = await response.text();
+            console.warn('Error escribiendo en Google Sheets:', error);
+            return false;
+        }
+    } catch (error) {
+        console.error('Error escribiendo en Sheets:', error);
+        return false;
+    }
+}
 
 async function loadDataFromSheets(token) {
     try {
@@ -540,7 +604,7 @@ function setTodayDate() {
     document.getElementById('date').value = today;
 }
 
-document.getElementById('expenseForm').addEventListener('submit', (e) => {
+document.getElementById('expenseForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const expense = {
@@ -554,10 +618,28 @@ document.getElementById('expenseForm').addEventListener('submit', (e) => {
 
     expenses.unshift(expense); // Agregar al inicio
     saveDataToLocalStorage();
+    
+    // Intentar escribir en Google Sheets si hay token
+    const token = localStorage.getItem('googleIdToken');
+    if (token && currentUser) {
+        try {
+            const success = await writeToGoogleSheets(expense, token);
+            if (success) {
+                showAlert('✅ Gasto guardado en Google Sheets', 'success');
+            } else {
+                showAlert('⚠️ Gasto guardado localmente (no se sincronizó)', 'warning');
+            }
+        } catch (error) {
+            console.warn('Error sincronizando con Sheets:', error);
+            showAlert('⚠️ Gasto guardado localmente', 'warning');
+        }
+    } else {
+        showAlert('✅ Gasto agregado (inicia sesión para sincronizar)', 'success');
+    }
+    
     refreshUI();
     document.getElementById('expenseForm').reset();
     setTodayDate();
-    showAlert('Gasto agregado exitosamente ✓', 'success');
 });
 
 // ==================== DELETE EXPENSE ====================
