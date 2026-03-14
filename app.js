@@ -15,7 +15,7 @@ function initializeSpeechRecognition() {
         const voiceBtn = document.getElementById('voiceBtn');
         if (voiceBtn) {
             voiceBtn.style.display = 'none';
-        }document.getElementById('voiceBtn')?.style.display = 'none';
+        }
         return;
     }
 
@@ -88,6 +88,8 @@ function toggleVoiceRecording() {
 
 function updateVoiceButtonState() {
     const btn = document.getElementById('voiceBtn');
+    if (!btn) return; // Si el botón no existe, salir
+    
     if (isListening) {
         btn.classList.add('recording');
         btn.innerHTML = '🛑 Deteniendo...';
@@ -311,7 +313,10 @@ function showVoiceConfirmation(items) {
 }
 
 function cancelVoiceConfirmation() {
-    document.body.querySelector('[style*="fadeIn"]')?.remove();
+    const overlay = document.body.querySelector('[style*="fadeIn"]');
+    if (overlay) {
+        overlay.remove();
+    }
 }
 
 function addVoiceExpenses(items) {
@@ -336,7 +341,10 @@ function addVoiceExpenses(items) {
     showAlert(`✅ Agregados ${items.length} gasto${items.length > 1 ? 's' : ''} correctamente`, 'success');
     
     // Scroll a la tabla
-    document.querySelector('.table-section')?.scrollIntoView({ behavior: 'smooth' });
+    const tableSection = document.querySelector('.table-section');
+    if (tableSection) {
+        tableSection.scrollIntoView({ behavior: 'smooth' });
+    }
 }
 
 function guessCategory(description) {
@@ -433,7 +441,10 @@ function signOut() {
     showAlert('Sesión cerrada', 'success');
 }
 
-document.getElementById('signoutBtn')?.addEventListener('click', signOut);
+const signoutBtn = document.getElementById('signoutBtn');
+if (signoutBtn) {
+    signoutBtn.addEventListener('click', signOut);
+}
 
 // ==================== GOOGLE SHEETS API ====================
 
