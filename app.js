@@ -382,7 +382,13 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==================== GOOGLE SIGN IN ====================
 
 function initializeGoogleSignIn() {
-    // Información de configuración de cliente
+    // Esperar a que google esté disponible
+    if (!window.google) {
+        console.log('Esperando a que Google Sign-In cargue...');
+        setTimeout(initializeGoogleSignIn, 100);
+        return;
+    }
+
     const clientId = CONFIG.GOOGLE_CLIENT_ID;
     
     if (!clientId || clientId === "TU_CLIENT_ID.apps.googleusercontent.com") {
@@ -391,23 +397,26 @@ function initializeGoogleSignIn() {
         return;
     }
 
-    window.google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleCredentialResponse,
-        scope: SCOPES.join(' ')
-    });
+    try {
+        window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: handleCredentialResponse
+        });
 
-    window.google.accounts.id.renderButton(
-        document.getElementById('buttonDiv'),
-        {
-            theme: 'outline',
-            size: 'large',
-            text: 'signin_with'
-        }
-    );
-
-    // Cargar Google API
-    gapi.load('client', initializeGoogleAPI);
+        window.google.accounts.id.renderButton(
+            document.getElementById('buttonDiv'),
+            {
+                theme: 'outline',
+                size: 'large',
+                text: 'signin_with'
+            }
+        );
+        
+        console.log('✅ Google Sign-In inicializado correctamente');
+    } catch (error) {
+        console.error('Error inicializando Google Sign-In:', error);
+        showAlert('Error al cargar Google Sign-In', 'error');
+    }
 }
 
 function handleCredentialResponse(response) {
