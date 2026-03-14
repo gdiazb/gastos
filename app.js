@@ -2,10 +2,12 @@
 
 // Estas funciones deben estar en el scope global ANTES de que se carguen los scripts
 window.gapiLoaded = function() {
+    console.log('📡 GAPI script cargado');
     gapi.load('client:auth2', initializeGapiClient);
 };
 
 window.gisLoaded = function() {
+    console.log('📡 Platform script cargado');
     // Ya no usamos GIS, solo marcamos como cargado
     gisInited = true;
     maybeEnableButtons();
@@ -29,15 +31,24 @@ let isListening = false;
 // ==================== GOOGLE API INITIALIZATION ====================
 
 async function initializeGapiClient() {
+    console.log('🔧 Inicializando GAPI client...');
     try {
+        // Primero inicializar el client
         await gapi.client.init({
-            apiKey: '', // No necesitamos API key para OAuth
-            clientId: CONFIG.GOOGLE_CLIENT_ID,
             discoveryDocs: CONFIG.DISCOVERY_DOCS,
+        });
+        
+        console.log('✅ GAPI client inicializado');
+        
+        // Luego inicializar auth2
+        await gapi.auth2.init({
+            client_id: CONFIG.GOOGLE_CLIENT_ID,
             scope: CONFIG.SCOPES
         });
         
         auth2 = gapi.auth2.getAuthInstance();
+        console.log('✅ Auth2 inicializado');
+        
         gapiInited = true;
         
         // Escuchar cambios en el estado de autenticación
@@ -48,17 +59,21 @@ async function initializeGapiClient() {
         
         maybeEnableButtons();
     } catch (error) {
-        console.error('Error inicializando GAPI client:', error);
-        showAlert('Error al inicializar Google API', 'error');
+        console.error('❌ Error inicializando GAPI client:', error);
+        console.error('Detalles del error:', JSON.stringify(error, null, 2));
+        showAlert('Error al inicializar Google API. Revisa la consola.', 'error');
     }
 }
 
 function updateSigninStatus(isSignedIn) {
+    console.log('🔐 Estado de autenticación:', isSignedIn);
+    
     if (isSignedIn) {
         currentUser = auth2.currentUser.get();
         document.getElementById('signoutBtn').style.display = 'block';
         document.getElementById('authorizeBtn').style.display = 'none';
-        document.getElementById('syncNotice').style.display = 'none';
+        const syncNotice = document.getElementById('syncNotice');
+        if (syncNotice) syncNotice.style.display = 'none';
         
         // Cargar datos desde Google Sheets
         loadDataFromGoogleSheets();
@@ -67,7 +82,8 @@ function updateSigninStatus(isSignedIn) {
         currentUser = null;
         document.getElementById('signoutBtn').style.display = 'none';
         document.getElementById('authorizeBtn').style.display = 'block';
-        document.getElementById('syncNotice').style.display = 'block';
+        const syncNotice = document.getElementById('syncNotice');
+        if (syncNotice) syncNotice.style.display = 'block';
     }
 }
 
