@@ -499,7 +499,7 @@ async function writeToGoogleSheets(expense) {
             return false;
         }
 
-        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxIOq45kieujHT_dgKhLJWpjMxsjzzB--fAqEwjLOF0GfDdELP2fM0Gq8sg-gmRGuycXQ/exec";
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxwAWp_e7YmUDQ_1xXfQ-R-Qa5bwxTmBDX7O_0TNJUO8ExV1Ayx43wVyImFq2jGyLgsqg/exec";
 
         // Enviar datos al Apps Script
         const response = await fetch(APPS_SCRIPT_URL, {
