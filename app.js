@@ -584,34 +584,50 @@ function showVoiceConfirmation(items) {
 
 // ==================== FORM HANDLING ====================
 
-document.getElementById('expenseForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const formData = {
-        date: document.getElementById('date').value,
-        category: document.getElementById('category').value,
-        description: document.getElementById('description').value,
-        amount: document.getElementById('amount').value,
-        paidBy: document.getElementById('paidBy').value
-    };
-
-    await addExpense(formData);
-    e.target.reset();
+function setupFormHandler() {
+    const form = document.getElementById('expenseForm');
+    if (!form) {
+        console.error('Form no encontrado');
+        return;
+    }
     
-    // Resetear fecha a hoy
-    document.getElementById('date').valueAsDate = new Date();
-});
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = {
+            date: document.getElementById('date').value,
+            category: document.getElementById('category').value,
+            description: document.getElementById('description').value,
+            amount: document.getElementById('amount').value,
+            paidBy: document.getElementById('paidBy').value
+        };
+
+        await addExpense(formData);
+        e.target.reset();
+        
+        // Resetear fecha a hoy
+        document.getElementById('date').valueAsDate = new Date();
+    });
+}
 
 // ==================== FILTERS ====================
 
-document.getElementById('monthFilter').addEventListener('change', refreshUI);
-document.getElementById('categoryFilter').addEventListener('change', refreshUI);
-
-document.getElementById('clearFilters').addEventListener('click', () => {
-    document.getElementById('monthFilter').value = '';
-    document.getElementById('categoryFilter').value = '';
-    refreshUI();
-});
+function setupFilters() {
+    const monthFilter = document.getElementById('monthFilter');
+    const categoryFilter = document.getElementById('categoryFilter');
+    const clearFilters = document.getElementById('clearFilters');
+    
+    if (monthFilter) monthFilter.addEventListener('change', refreshUI);
+    if (categoryFilter) categoryFilter.addEventListener('change', refreshUI);
+    
+    if (clearFilters) {
+        clearFilters.addEventListener('click', () => {
+            document.getElementById('monthFilter').value = '';
+            document.getElementById('categoryFilter').value = '';
+            refreshUI();
+        });
+    }
+}
 
 function getFilteredExpenses() {
     let filtered = [...expenses];
@@ -868,18 +884,32 @@ if (!document.getElementById('alert-animations')) {
 
 // Inicializar cuando carga la página
 window.addEventListener('load', () => {
+    console.log('🚀 Iniciando Finan-Zas...');
+    
     // Cargar datos locales primero
     loadDataFromLocalStorage();
     
     // Inicializar fecha de hoy
-    document.getElementById('date').valueAsDate = new Date();
+    const dateInput = document.getElementById('date');
+    if (dateInput) {
+        dateInput.valueAsDate = new Date();
+    }
+    
+    // Configurar event listeners
+    setupFormHandler();
+    setupFilters();
     
     // Inicializar reconocimiento de voz
     initializeSpeechRecognition();
     
     // Configurar botón de sign out
-    document.getElementById('signoutBtn').addEventListener('click', handleSignoutClick);
+    const signoutBtn = document.getElementById('signoutBtn');
+    if (signoutBtn) {
+        signoutBtn.addEventListener('click', handleSignoutClick);
+    }
     
     // Intentar habilitar botones (por si los APIs ya están listos)
     maybeEnableButtons();
+    
+    console.log('✅ Finan-Zas inicializado');
 });
