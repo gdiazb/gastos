@@ -41,21 +41,46 @@ function gisLoaded() {
 }
 
 function maybeEnableButtons() {
+    const authorizeBtn = document.getElementById('authorizeBtn');
+    
     if (gapiInited && gisInited) {
-        console.log('Google API inicializado correctamente');
+        console.log('✅ Google API inicializado correctamente');
+        if (authorizeBtn) {
+            authorizeBtn.disabled = false;
+            authorizeBtn.style.opacity = '1';
+            authorizeBtn.style.cursor = 'pointer';
+        }
+    } else {
+        console.log('⏳ Esperando inicialización de Google API...', {gapiInited, gisInited});
+        if (authorizeBtn) {
+            authorizeBtn.disabled = true;
+            authorizeBtn.style.opacity = '0.5';
+            authorizeBtn.style.cursor = 'not-allowed';
+        }
     }
 }
 
 // ==================== AUTHENTICATION ====================
 
 function handleAuthClick() {
+    // Verificar que el API esté inicializado
+    if (!tokenClient) {
+        showAlert('Google API aún no está listo. Espera un momento e intenta de nuevo.', 'warning');
+        console.error('tokenClient no está inicializado');
+        return;
+    }
+
     tokenClient.callback = async (resp) => {
         if (resp.error !== undefined) {
-            throw (resp);
+            console.error('Error en autenticación:', resp);
+            showAlert('Error al iniciar sesión: ' + resp.error, 'error');
+            return;
         }
         
         currentUser = gapi.client.getToken();
         document.getElementById('signoutBtn').style.display = 'block';
+        document.getElementById('authorizeBtn').style.display = 'none';
+        document.getElementById('syncNotice').style.display = 'none';
         
         // Cargar datos desde Google Sheets
         await loadDataFromGoogleSheets();
@@ -76,6 +101,8 @@ function handleSignoutClick() {
         gapi.client.setToken('');
         currentUser = null;
         document.getElementById('signoutBtn').style.display = 'none';
+        document.getElementById('authorizeBtn').style.display = 'block';
+        document.getElementById('syncNotice').style.display = 'block';
         
         // Limpiar datos locales
         expenses = [];
@@ -847,6 +874,9 @@ window.addEventListener('load', () => {
     
     // Configurar botón de sign out
     document.getElementById('signoutBtn').addEventListener('click', handleSignoutClick);
+    
+    // Intentar habilitar botones (por si los APIs ya están listos)
+    maybeEnableButtons();
 });
 
 // Cargar Google API
