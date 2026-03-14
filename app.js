@@ -1,14 +1,252 @@
 // Estado global
 let expenses = [];
 let currentUser = null;
-let gapi = window.gapi;
+let gapiInited = false;
+let gisInited = false;
+let tokenClient;
 
 // Speech Recognition API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let isListening = false;
 
-// Inicialización del reconocimiento de voz
+// ==================== GOOGLE API INITIALIZATION ====================
+
+function gapiLoaded() {
+    gapi.load('client', initializeGapiClient);
+}
+
+async function initializeGapiClient() {
+    try {
+        await gapi.client.init({
+            apiKey: '', // No necesitamos API key para OAuth
+            discoveryDocs: CONFIG.DISCOVERY_DOCS,
+        });
+        gapiInited = true;
+        maybeEnableButtons();
+    } catch (error) {
+        console.error('Error inicializando GAPI client:', error);
+        showAlert('Error al inicializar Google API', 'error');
+    }
+}
+
+function gisLoaded() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        scope: CONFIG.SCOPES,
+        callback: '', // Se define después
+    });
+    gisInited = true;
+    maybeEnableButtons();
+}
+
+function maybeEnableButtons() {
+    if (gapiInited && gisInited) {
+        console.log('Google API inicializado correctamente');
+    }
+}
+
+// ==================== AUTHENTICATION ====================
+
+function handleAuthClick() {
+    tokenClient.callback = async (resp) => {
+        if (resp.error !== undefined) {
+            throw (resp);
+        }
+        
+        currentUser = gapi.client.getToken();
+        document.getElementById('signoutBtn').style.display = 'block';
+        
+        // Cargar datos desde Google Sheets
+        await loadDataFromGoogleSheets();
+        showAlert('¡Sesión iniciada correctamente!', 'success');
+    };
+
+    if (gapi.client.getToken() === null) {
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+        tokenClient.requestAccessToken({ prompt: '' });
+    }
+}
+
+function handleSignoutClick() {
+    const token = gapi.client.getToken();
+    if (token !== null) {
+        google.accounts.oauth2.revoke(token.access_token);
+        gapi.client.setToken('');
+        currentUser = null;
+        document.getElementById('signoutBtn').style.display = 'none';
+        
+        // Limpiar datos locales
+        expenses = [];
+        refreshUI();
+        showAlert('Sesión cerrada', 'info');
+    }
+}
+
+// ==================== GOOGLE SHEETS OPERATIONS ====================
+
+async function loadDataFromGoogleSheets() {
+    try {
+        showLoading(true);
+        
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: CONFIG.SPREADSHEET_ID,
+            range: 'A2:F', // Desde la fila 2 hasta el final (saltando encabezados)
+        });
+
+        const rows = response.result.values || [];
+        
+        expenses = rows.map(row => ({
+            date: row[0] || '',
+            category: row[1] || '',
+            description: row[2] || '',
+            amount: parseFloat(row[3]) || 0,
+            paidBy: row[4] || '',
+            id: row[5] || generateId()
+        }));
+
+        // También guardar en localStorage como respaldo
+        saveDataToLocalStorage();
+        refreshUI();
+        
+        showAlert(`${expenses.length} gastos cargados desde Google Sheets`, 'success');
+    } catch (error) {
+        console.error('Error cargando datos:', error);
+        showAlert('Error al cargar datos de Google Sheets. Usando datos locales.', 'warning');
+        loadDataFromLocalStorage();
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function saveExpenseToGoogleSheets(expense) {
+    try {
+        showLoading(true);
+        
+        const values = [[
+            expense.date,
+            expense.category,
+            expense.description,
+            expense.amount,
+            expense.paidBy,
+            expense.id
+        ]];
+
+        await gapi.client.sheets.spreadsheets.values.append({
+            spreadsheetId: CONFIG.SPREADSHEET_ID,
+            range: 'A2:F',
+            valueInputOption: 'USER_ENTERED',
+            resource: { values }
+        });
+
+        showAlert('Gasto guardado exitosamente', 'success');
+    } catch (error) {
+        console.error('Error guardando gasto:', error);
+        showAlert('Error al guardar en Google Sheets. Guardado solo localmente.', 'warning');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function deleteExpenseFromGoogleSheets(expenseId) {
+    try {
+        showLoading(true);
+        
+        // Primero, obtener todos los datos para encontrar la fila
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: CONFIG.SPREADSHEET_ID,
+            range: 'A2:F',
+        });
+
+        const rows = response.result.values || [];
+        const rowIndex = rows.findIndex(row => row[5] === expenseId);
+
+        if (rowIndex !== -1) {
+            const actualRowNumber = rowIndex + 2; // +2 porque empezamos en A2
+            
+            await gapi.client.sheets.spreadsheets.batchUpdate({
+                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                resource: {
+                    requests: [{
+                        deleteDimension: {
+                            range: {
+                                sheetId: 0,
+                                dimension: 'ROWS',
+                                startIndex: actualRowNumber - 1,
+                                endIndex: actualRowNumber
+                            }
+                        }
+                    }]
+                }
+            });
+
+            showAlert('Gasto eliminado exitosamente', 'success');
+        }
+    } catch (error) {
+        console.error('Error eliminando gasto:', error);
+        showAlert('Error al eliminar de Google Sheets', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// ==================== LOCAL STORAGE (BACKUP) ====================
+
+function saveDataToLocalStorage() {
+    localStorage.setItem('expenses', JSON.stringify(expenses));
+}
+
+function loadDataFromLocalStorage() {
+    const stored = localStorage.getItem('expenses');
+    if (stored) {
+        expenses = JSON.parse(stored);
+        refreshUI();
+    }
+}
+
+// ==================== EXPENSE MANAGEMENT ====================
+
+async function addExpense(expenseData) {
+    const expense = {
+        id: generateId(),
+        ...expenseData,
+        amount: parseFloat(expenseData.amount)
+    };
+
+    expenses.unshift(expense);
+    saveDataToLocalStorage();
+    
+    // Si está autenticado, guardar también en Google Sheets
+    if (gapi.client.getToken() !== null) {
+        await saveExpenseToGoogleSheets(expense);
+    }
+    
+    refreshUI();
+}
+
+async function deleteExpense(expenseId) {
+    if (!confirm('¿Estás seguro de eliminar este gasto?')) {
+        return;
+    }
+
+    expenses = expenses.filter(e => e.id !== expenseId);
+    saveDataToLocalStorage();
+    
+    // Si está autenticado, eliminar también de Google Sheets
+    if (gapi.client.getToken() !== null) {
+        await deleteExpenseFromGoogleSheets(expenseId);
+    }
+    
+    refreshUI();
+}
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+// ==================== SPEECH RECOGNITION ====================
+
 function initializeSpeechRecognition() {
     if (!SpeechRecognition) {
         console.warn('Speech Recognition no soportado en este navegador');
@@ -22,7 +260,7 @@ function initializeSpeechRecognition() {
     recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.lang = 'es-CO'; // Español de Colombia
+    recognition.lang = 'es-CO';
 
     recognition.onstart = () => {
         isListening = true;
@@ -33,11 +271,9 @@ function initializeSpeechRecognition() {
         let transcript = '';
         
         for (let i = event.resultIndex; i < event.results.length; i++) {
-            const isFinal = event.results[i].isFinal;
             transcript += event.results[i][0].transcript;
         }
 
-        // Mostrar transcripción en tiempo real
         document.getElementById('voiceTranscript').textContent = transcript || 'Escuchando...';
         
         if (event.results[event.results.length - 1].isFinal) {
@@ -81,6 +317,7 @@ function toggleVoiceRecording() {
     if (isListening) {
         recognition.stop();
     } else {
+        document.getElementById('voiceTranscript').style.display = 'block';
         document.getElementById('voiceTranscript').textContent = 'Escuchando...';
         recognition.start();
     }
@@ -88,25 +325,28 @@ function toggleVoiceRecording() {
 
 function updateVoiceButtonState() {
     const btn = document.getElementById('voiceBtn');
-    if (!btn) return; // Si el botón no existe, salir
+    const transcript = document.getElementById('voiceTranscript');
+    
+    if (!btn) return;
     
     if (isListening) {
         btn.classList.add('recording');
-        btn.innerHTML = '🛑 Deteniendo...';
+        btn.innerHTML = '🛑 Detener';
+        transcript.style.display = 'block';
     } else {
         btn.classList.remove('recording');
         btn.innerHTML = '🎤 Dictar Gastos';
+        setTimeout(() => {
+            transcript.style.display = 'none';
+        }, 2000);
     }
 }
 
 function processVoiceInput(transcript) {
-    // Limpiar el transcript
     const text = transcript.toLowerCase().trim();
     
-    // Detectar quién pagó al inicio
-    let paidBy = 'Yo'; // por defecto
+    let paidBy = 'Yo';
     
-    // Patrones para detectar quién pagó
     const esposoPatterns = [
         /^(mi\s+)?esposo/,
         /^(mi\s+)?pareja/,
@@ -123,16 +363,12 @@ function processVoiceInput(transcript) {
         /^gasté/
     ];
     
-    // Detectar patrón de esposo
     if (esposoPatterns.some(p => p.test(text))) {
         paidBy = 'Mi pareja';
-    } 
-    // Detectar patrón de yo
-    else if (yoPatterns.some(p => p.test(text))) {
+    } else if (yoPatterns.some(p => p.test(text))) {
         paidBy = 'Yo';
     }
     
-    // Remover el prefijo de quién pagó para procesar los gastos
     let cleanText = text;
     cleanText = cleanText.replace(/^(mi\s+)?esposo\s+/, '');
     cleanText = cleanText.replace(/^(mi\s+)?pareja\s+/, '');
@@ -143,8 +379,6 @@ function processVoiceInput(transcript) {
     cleanText = cleanText.replace(/^yo\s+/, '');
     cleanText = cleanText.replace(/^(pagué|gasté)\s+/, '');
     
-    // Patrón: "concepto $cantidad"
-    // Ejemplos: "cine $20000", "cinerol $20.000", "gaseosa $3000"
     const pattern = /([a-záéíóúñ\s]+?)\s*\$?\s*([\d.,]+)/gi;
     const matches = [];
     let match;
@@ -159,16 +393,14 @@ function processVoiceInput(transcript) {
     }
 
     if (matches.length === 0) {
-        showAlert('No detecté gastos en tu grabación. Intenta: "cine $20000, gaseosa $3000"', 'warning');
+        showAlert('No detecté gastos. Intenta: "cine $20000, gaseosa $3000"', 'warning');
         return;
     }
 
-    // Crear modal de confirmación
     showVoiceConfirmation(matches);
 }
 
 function showVoiceConfirmation(items) {
-    // Crear overlay
     const overlay = document.createElement('div');
     overlay.style.cssText = `
         position: fixed;
@@ -184,7 +416,6 @@ function showVoiceConfirmation(items) {
         animation: fadeIn 0.3s ease;
     `;
 
-    // Modal
     const modal = document.createElement('div');
     modal.style.cssText = `
         background: var(--surface);
@@ -212,7 +443,7 @@ function showVoiceConfirmation(items) {
     let totalYo = 0;
     let totalPareja = 0;
     
-    items.forEach((item, index) => {
+    items.forEach((item) => {
         total += item.amount;
         if (item.paidBy === 'Yo') {
             totalYo += item.amount;
@@ -263,17 +494,10 @@ function showVoiceConfirmation(items) {
                     </div>
                 </div>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 12px 0; margin-top: 4px; font-size: 14px;">
-                <span style="color: var(--text-primary); font-weight: 700;">Total General</span>
-                <span style="color: var(--primary-color); font-weight: 700; font-size: 16px;">
-                    ${formatCurrency(total)}
-                </span>
-            </div>
         </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <button onclick="cancelVoiceConfirmation()" style="
-                padding: 12px;
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+            <button id="cancelVoiceBtn" style="
+                padding: 12px 24px;
                 background: var(--border-color);
                 color: var(--text-primary);
                 border: none;
@@ -281,12 +505,11 @@ function showVoiceConfirmation(items) {
                 cursor: pointer;
                 font-weight: 600;
                 font-size: 14px;
-                transition: all 0.3s;
-            " onmouseover="this.style.background='#cbd5e1'" onmouseout="this.style.background='var(--border-color)'">
+            ">
                 Cancelar
             </button>
-            <button onclick="addVoiceExpenses(${JSON.stringify(items).replace(/"/g, '&quot;')})" style="
-                padding: 12px;
+            <button id="confirmVoiceBtn" style="
+                padding: 12px 24px;
                 background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
                 color: white;
                 border: none;
@@ -294,9 +517,8 @@ function showVoiceConfirmation(items) {
                 cursor: pointer;
                 font-weight: 600;
                 font-size: 14px;
-                transition: all 0.3s;
-            " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                ✅ Confirmar
+            ">
+                Confirmar Todos
             </button>
         </div>
     `;
@@ -305,373 +527,54 @@ function showVoiceConfirmation(items) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            overlay.remove();
-        }
-    });
-}
-
-function cancelVoiceConfirmation() {
-    const overlay = document.body.querySelector('[style*="fadeIn"]');
-    if (overlay) {
+    document.getElementById('cancelVoiceBtn').onclick = () => {
         overlay.remove();
-    }
-}
+    };
 
-function addVoiceExpenses(items) {
-    const today = new Date().toISOString().split('T')[0];
-    
-    items.forEach(async (item) => {
-        const expense = {
-            date: today,
-            category: guessCategory(item.concept),
-            description: item.concept,
-            amount: item.amount,
-            paidBy: item.paidBy,
-            id: Date.now().toString() + Math.random()
-        };
+    document.getElementById('confirmVoiceBtn').onclick = async () => {
+        overlay.remove();
         
-        expenses.unshift(expense);
+        const today = new Date().toISOString().split('T')[0];
         
-        // Intentar escribir en Google Sheets usando Apps Script
-        try {
-            await writeToGoogleSheets(expense);
-        } catch (error) {
-            console.warn('Error al sincronizar gasto de voz:', error);
-        }
-    });
-
-    saveDataToLocalStorage();
-    refreshUI();
-    cancelVoiceConfirmation();
-    showAlert(`✅ Agregados ${items.length} gasto${items.length > 1 ? 's' : ''} correctamente`, 'success');
-    
-    // Scroll a la tabla
-    const tableSection = document.querySelector('.table-section');
-    if (tableSection) {
-        tableSection.scrollIntoView({ behavior: 'smooth' });
-    }
-}
-
-function guessCategory(description) {
-    const desc = description.toLowerCase();
-    
-    if (desc.includes('cine') || desc.includes('película') || desc.includes('cinema')) return 'Entretenimiento';
-    if (desc.includes('gaseosa') || desc.includes('café') || desc.includes('comida') || desc.includes('burger') || desc.includes('pizza')) return 'Comida';
-    if (desc.includes('taxi') || desc.includes('uber') || desc.includes('transporte') || desc.includes('gasolina') || desc.includes('bus')) return 'Transporte';
-    if (desc.includes('ropa') || desc.includes('zapatos') || desc.includes('compra')) return 'Compras';
-    if (desc.includes('doctor') || desc.includes('medicina') || desc.includes('farmacia') || desc.includes('salud')) return 'Salud';
-    if (desc.includes('luz') || desc.includes('agua') || desc.includes('internet') || desc.includes('teléfono')) return 'Servicios';
-    
-    return 'Otro';
-}
-
-// Inicialización
-document.addEventListener('DOMContentLoaded', () => {
-    setTodayDate();
-    initializeGoogleSignIn();
-    initializeSpeechRecognition();
-});
-
-// ==================== GOOGLE SIGN IN ====================
-
-function initializeGoogleSignIn() {
-    // Esperar a que google esté disponible
-    if (!window.google) {
-        console.log('Esperando a que Google Sign-In cargue...');
-        setTimeout(initializeGoogleSignIn, 100);
-        return;
-    }
-
-    const clientId = CONFIG.GOOGLE_CLIENT_ID;
-    
-    if (!clientId || clientId === "TU_CLIENT_ID.apps.googleusercontent.com") {
-        console.warn("⚠️ CONFIGURACIÓN: Falta configurar GOOGLE_CLIENT_ID en config.js");
-        showAlert("⚠️ Configura tu GOOGLE_CLIENT_ID en config.js", "error");
-        return;
-    }
-
-    try {
-        console.log('Inicializando Google Accounts con Client ID:', clientId);
-        
-        window.google.accounts.id.initialize({
-            client_id: clientId,
-            callback: handleCredentialResponse,
-            ux_mode: 'popup'
-        });
-
-        // Renderizar botón
-        const buttonDiv = document.getElementById('buttonDiv');
-        if (buttonDiv) {
-            window.google.accounts.id.renderButton(buttonDiv, {
-                theme: 'outline',
-                size: 'large',
-                text: 'signin_with'
+        for (const item of items) {
+            await addExpense({
+                date: today,
+                category: 'Otro',
+                description: item.concept,
+                amount: item.amount,
+                paidBy: item.paidBy
             });
-            console.log('✅ Botón de Google Sign-In renderizado');
-        } else {
-            console.error('❌ No se encontró elemento #buttonDiv');
         }
-    } catch (error) {
-        console.error('❌ Error inicializando Google Sign-In:', error);
-        showAlert('Error al cargar Google Sign-In: ' + error.message, 'error');
-    }
-}
-
-function handleCredentialResponse(response) {
-    try {
-        console.log('✅ Respuesta de Google recibida');
         
-        if (!response.credential) {
-            console.error('❌ No hay credential en la respuesta');
-            showAlert('Error: No se recibió credencial de Google', 'error');
-            return;
-        }
-
-        // Decodificar JWT token
-        const base64Url = response.credential.split('.')[1];
-        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(
-            atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
-        );
-        
-        const user = JSON.parse(jsonPayload);
-        currentUser = user.email;
-        
-        console.log('👤 Usuario:', currentUser);
-        
-        // GUARDAR el token en localStorage para usarlo después
-        localStorage.setItem('googleIdToken', response.credential);
-        console.log('💾 Token guardado en localStorage');
-        
-        document.getElementById('userEmail').textContent = currentUser;
-        document.getElementById('signoutBtn').style.display = 'inline-block';
-        document.getElementById('buttonDiv').style.display = 'none';
-
-        // Inicializar API después de autenticarse
-        initializeGoogleAPI(response.credential);
-        
-        showAlert(`✅ Bienvenido ${currentUser}`, 'success');
-        console.log('✅ Sesión iniciada correctamente');
-    } catch (error) {
-        console.error('❌ Error en handleCredentialResponse:', error);
-        showAlert('Error al procesar credencial de Google: ' + error.message, 'error');
-    }
-}
-
-function initializeGoogleAPI(token) {
-    // Guardar token para usar en writeToGoogleSheets
-    localStorage.setItem('googleIdToken', token);
-    
-    // Intenta cargar datos si es posible
-    if (typeof gapi !== 'undefined' && gapi.client) {
-        loadDataFromSheets(token);
-    } else {
-        // Fallback: usar localStorage como demostración
-        loadDataFromLocalStorage();
-    }
-}
-
-function signOut() {
-    google.accounts.id.disableAutoSelect();
-    currentUser = null;
-    document.getElementById('userEmail').textContent = '';
-    document.getElementById('signoutBtn').style.display = 'none';
-    document.getElementById('buttonDiv').style.display = 'block';
-    expenses = [];
-    refreshUI();
-    showAlert('Sesión cerrada', 'success');
-}
-
-const signoutBtn = document.getElementById('signoutBtn');
-if (signoutBtn) {
-    signoutBtn.addEventListener('click', signOut);
-}
-
-// ==================== GOOGLE SHEETS API ====================
-
-// Función para escribir en Google Sheets a través de Apps Script
-async function writeToGoogleSheets(expense) {
-    try {
-        if (!expense) {
-            console.warn("No hay gasto para escribir");
-            return false;
-        }
-
-        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxwAWp_e7YmUDQ_1xXfQ-R-Qa5bwxTmBDX7O_0TNJUO8ExV1Ayx43wVyImFq2jGyLgsqg/exec";
-
-        // Enviar datos al Apps Script
-        const response = await fetch(APPS_SCRIPT_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                date: expense.date,
-                category: expense.category,
-                description: expense.description,
-                amount: expense.amount,
-                paidBy: expense.paidBy,
-                id: expense.id
-            })
-        });
-
-        const result = await response.json();
-        
-        if (result.success) {
-            console.log('✅ Gasto escrito en Google Sheets:', result.message);
-            return true;
-        } else {
-            console.warn('⚠️ Error en Apps Script:', result.message);
-            return false;
-        }
-    } catch (error) {
-        console.error('❌ Error escribiendo en Sheets:', error);
-        return false;
-    }
-}
-
-async function loadDataFromSheets(token) {
-    try {
-        showLoading(true);
-        
-        // Verificar que la configuración esté completa
-        if (!CONFIG.SPREADSHEET_ID || CONFIG.SPREADSHEET_ID === "TU_ID_AQUI") {
-            throw new Error("SPREADSHEET_ID no configurado");
-        }
-
-        // Fetch desde Google Sheets API
-        const response = await fetch(
-            `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.SHEET_NAME}!${CONFIG.RANGE}`,
-            {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
-
-        if (!response.ok) {
-            // Si falla, usar localStorage como fallback
-            console.warn("Error cargando desde Sheets, usando localStorage");
-            loadDataFromLocalStorage();
-            return;
-        }
-
-        const data = await response.json();
-        
-        // Procesar datos del Sheet (omitir encabezados)
-        if (data.values && data.values.length > 1) {
-            expenses = data.values.slice(1).map((row, index) => ({
-                date: row[0] || '',
-                category: row[1] || '',
-                description: row[2] || '',
-                amount: parseFloat(row[3]) || 0,
-                paidBy: row[4] || '',
-                id: row[5] || index
-            }));
-        }
-
-        refreshUI();
-        showLoading(false);
-        showAlert('Datos cargados correctamente', 'success');
-
-    } catch (error) {
-        console.error('Error cargando datos:', error);
-        // Fallback a localStorage
-        loadDataFromLocalStorage();
-        showLoading(false);
-    }
-}
-
-async function saveDataToSheets(expense) {
-    try {
-        showLoading(true);
-
-        // Para una implementación completa, necesitarías un backend
-        // Por ahora, guardamos localmente y luego sincronizamos
-        saveDataToLocalStorage();
-        showLoading(false);
-        showAlert('Gasto guardado correctamente', 'success');
-
-    } catch (error) {
-        console.error('Error guardando datos:', error);
-        showLoading(false);
-        showAlert('Error al guardar', 'error');
-    }
-}
-
-// ==================== LOCAL STORAGE (FALLBACK) ====================
-
-function loadDataFromLocalStorage() {
-    const saved = localStorage.getItem('expenses');
-    if (saved) {
-        expenses = JSON.parse(saved);
-    }
-    refreshUI();
-}
-
-function saveDataToLocalStorage() {
-    localStorage.setItem('expenses', JSON.stringify(expenses));
+        showAlert(`${items.length} gastos agregados exitosamente`, 'success');
+    };
 }
 
 // ==================== FORM HANDLING ====================
 
-function setTodayDate() {
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('date').value = today;
-}
-
 document.getElementById('expenseForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const expense = {
+    const formData = {
         date: document.getElementById('date').value,
         category: document.getElementById('category').value,
         description: document.getElementById('description').value,
-        amount: parseFloat(document.getElementById('amount').value),
-        paidBy: document.getElementById('paidBy').value,
-        id: Date.now().toString()
+        amount: document.getElementById('amount').value,
+        paidBy: document.getElementById('paidBy').value
     };
 
-    expenses.unshift(expense);
-    saveDataToLocalStorage();
+    await addExpense(formData);
+    e.target.reset();
     
-    // Intentar escribir en Google Sheets usando Apps Script
-    try {
-        const success = await writeToGoogleSheets(expense);
-        if (success) {
-            showAlert('✅ Gasto guardado localmente y en Google Sheets', 'success');
-        } else {
-            showAlert('✅ Gasto guardado localmente (Sheets pendiente)', 'success');
-        }
-    } catch (error) {
-        console.warn('Error al sincronizar:', error);
-        showAlert('✅ Gasto guardado localmente', 'success');
-    }
-    
-    refreshUI();
-    document.getElementById('expenseForm').reset();
-    setTodayDate();
+    // Resetear fecha a hoy
+    document.getElementById('date').valueAsDate = new Date();
 });
 
-// ==================== DELETE EXPENSE ====================
-
-function deleteExpense(id) {
-    if (confirm('¿Estás seguro de que quieres eliminar este gasto?')) {
-        expenses = expenses.filter(e => e.id !== id);
-        saveDataToLocalStorage();
-        refreshUI();
-        showAlert('Gasto eliminado', 'success');
-    }
-}
-
-// ==================== FILTERING ====================
+// ==================== FILTERS ====================
 
 document.getElementById('monthFilter').addEventListener('change', refreshUI);
 document.getElementById('categoryFilter').addEventListener('change', refreshUI);
+
 document.getElementById('clearFilters').addEventListener('click', () => {
     document.getElementById('monthFilter').value = '';
     document.getElementById('categoryFilter').value = '';
@@ -681,13 +584,11 @@ document.getElementById('clearFilters').addEventListener('click', () => {
 function getFilteredExpenses() {
     let filtered = [...expenses];
 
-    // Filtro por mes
     const monthFilter = document.getElementById('monthFilter').value;
     if (monthFilter) {
         filtered = filtered.filter(e => e.date.startsWith(monthFilter));
     }
 
-    // Filtro por categoría
     const categoryFilter = document.getElementById('categoryFilter').value;
     if (categoryFilter) {
         filtered = filtered.filter(e => e.category === categoryFilter);
@@ -755,7 +656,6 @@ function updateStats() {
     const balanceEl = document.getElementById('balance');
     balanceEl.textContent = formatCurrency(Math.abs(stats.balance));
     
-    // Cambiar color según balance
     if (stats.balance > 0) {
         balanceEl.style.color = 'var(--danger-color)';
     } else if (stats.balance < 0) {
@@ -781,7 +681,7 @@ function renderExpensesTable() {
             <td>${exp.description}</td>
             <td><strong>${formatCurrency(exp.amount)}</strong></td>
             <td>
-                <span class="badge badge-${exp.paidBy.toLowerCase()}">
+                <span class="badge badge-${exp.paidBy.toLowerCase().replace(' ', '-')}">
                     ${exp.paidBy}
                 </span>
             </td>
@@ -793,7 +693,6 @@ function renderExpensesTable() {
         </tr>
     `).join('');
 
-    // Agregar estilos para badges
     if (!document.getElementById('badge-styles')) {
         const style = document.createElement('style');
         style.id = 'badge-styles';
@@ -808,7 +707,7 @@ function renderExpensesTable() {
                 background: #dbeafe;
                 color: #1e40af;
             }
-            .badge-mi {
+            .badge-mi-pareja {
                 background: #fed7aa;
                 color: #92400e;
             }
@@ -862,7 +761,6 @@ function formatDate(dateString) {
 }
 
 function showAlert(message, type = 'info') {
-    // Crear elemento de alerta
     const alert = document.createElement('div');
     alert.style.cssText = `
         position: fixed;
@@ -873,12 +771,15 @@ function showAlert(message, type = 'info') {
         font-weight: 600;
         z-index: 9999;
         animation: slideIn 0.3s ease-out;
+        max-width: 400px;
     `;
 
     if (type === 'success') {
         alert.style.background = 'var(--success-color)';
     } else if (type === 'error') {
         alert.style.background = 'var(--danger-color)';
+    } else if (type === 'warning') {
+        alert.style.background = 'var(--warning-color)';
     } else {
         alert.style.background = 'var(--primary-color)';
     }
@@ -888,7 +789,6 @@ function showAlert(message, type = 'info') {
 
     document.body.appendChild(alert);
 
-    // Auto-remover después de 3 segundos
     setTimeout(() => {
         alert.style.animation = 'slideOut 0.3s ease-out';
         setTimeout(() => alert.remove(), 300);
@@ -904,7 +804,8 @@ function showLoading(show) {
     }
 }
 
-// Agregar animaciones de alerta
+// ==================== INITIALIZATION ====================
+
 if (!document.getElementById('alert-animations')) {
     const style = document.createElement('style');
     style.id = 'alert-animations';
@@ -933,7 +834,21 @@ if (!document.getElementById('alert-animations')) {
     document.head.appendChild(style);
 }
 
-// Cargar datos al iniciar
+// Inicializar cuando carga la página
 window.addEventListener('load', () => {
+    // Cargar datos locales primero
     loadDataFromLocalStorage();
+    
+    // Inicializar fecha de hoy
+    document.getElementById('date').valueAsDate = new Date();
+    
+    // Inicializar reconocimiento de voz
+    initializeSpeechRecognition();
+    
+    // Configurar botón de sign out
+    document.getElementById('signoutBtn').addEventListener('click', handleSignoutClick);
 });
+
+// Cargar Google API
+window.gapiLoaded = gapiLoaded;
+window.gisLoaded = gisLoaded;

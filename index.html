@@ -3,21 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>💰 Gastos Compartidos</title>
+    <title>💰 Finan-Zas</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    
+    <!-- Google API Scripts -->
+    <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1 class="title">💰 Gastos Compartidos</h1>
+                <h1 class="title">💰 Finan-Zas</h1>
                 <div class="auth-section">
-                    <div id="buttonDiv"></div>
-                    <span id="userEmail" class="user-email"></span>
-                    <button id="signoutBtn" class="btn-signout" style="display:none;">Cerrar sesión</button>
+                    <button id="authorizeBtn" class="btn-signin" onclick="handleAuthClick()" style="display:block;">
+                        🔐 Iniciar Sesión con Google
+                    </button>
+                    <button id="signoutBtn" class="btn-signout" style="display:none;">
+                        Cerrar sesión
+                    </button>
                 </div>
+            </div>
+            <div class="sync-notice" id="syncNotice">
+                <p>⚠️ Inicia sesión con Google para sincronizar tus gastos en todos tus dispositivos</p>
             </div>
         </header>
 
@@ -27,19 +36,19 @@
             <section class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-label">Total Gastos</div>
-                    <div class="stat-value" id="totalSpent">$0.00</div>
+                    <div class="stat-value" id="totalSpent">$0</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Tu Monto</div>
-                    <div class="stat-value" id="mySpent">$0.00</div>
+                    <div class="stat-value" id="mySpent">$0</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Monto de Pareja</div>
-                    <div class="stat-value" id="partnerSpent">$0.00</div>
+                    <div class="stat-value" id="partnerSpent">$0</div>
                 </div>
                 <div class="stat-card balance">
                     <div class="stat-label">Balance</div>
-                    <div class="stat-value" id="balance">$0.00</div>
+                    <div class="stat-value" id="balance">$0</div>
                 </div>
             </section>
 
@@ -54,7 +63,7 @@
                         Escuchando...
                     </div>
                     <p class="voice-hint">
-                        💡 Di: "cine $20000, gaseosa $3000" o similar
+                        💡 Di: "cine $20000, gaseosa $3000" o "mi esposo uber $15000"
                     </p>
                 </div>
             </section>
@@ -90,7 +99,7 @@
                         </div>
                         <div class="form-group">
                             <label for="amount">Monto</label>
-                            <input type="number" id="amount" placeholder="0.00" step="0.01" min="0" required>
+                            <input type="number" id="amount" placeholder="0" step="1" min="0" required>
                         </div>
                     </div>
 
@@ -99,7 +108,7 @@
                             <label for="paidBy">Pagado por</label>
                             <select id="paidBy" required>
                                 <option value="">Selecciona quién pagó</option>
-                                <option value="Yo">👤 Yo (Tú)</option>
+                                <option value="Yo">👤 Yo</option>
                                 <option value="Mi pareja">👥 Mi pareja</option>
                                 <option value="Ambos">👫 Ambos</option>
                             </select>
@@ -170,10 +179,11 @@
         <!-- Loading Indicator -->
         <div id="loadingIndicator" class="loading-indicator" style="display:none;">
             <div class="spinner"></div>
-            <p>Sincronizando...</p>
+            <p>Sincronizando con Google Sheets...</p>
         </div>
     </div>
 
+    <!-- Scripts -->
     <script src="config.js"></script>
     <script src="app.js"></script>
 </body>
