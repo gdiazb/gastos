@@ -12,7 +12,10 @@ let isListening = false;
 function initializeSpeechRecognition() {
     if (!SpeechRecognition) {
         console.warn('Speech Recognition no soportado en este navegador');
-        document.getElementById('voiceBtn')?.style.display = 'none';
+        const voiceBtn = document.getElementById('voiceBtn');
+        if (voiceBtn) {
+            voiceBtn.style.display = 'none';
+        }document.getElementById('voiceBtn')?.style.display = 'none';
         return;
     }
 
