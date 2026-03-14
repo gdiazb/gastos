@@ -4,22 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>💰 Finan-Zas</title>
-
+    
     <!-- Favicons -->
     <link rel="icon" type="image/x-icon" href="favicon_io/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon_io/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="favicon_io/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="favicon_io/apple-touch-icon.png">
     <link rel="manifest" href="favicon_io/site.webmanifest">
-
+    
     <link rel="stylesheet" href="style.css">
     
-    <!-- Scripts -->
+    <!-- Cargar config y app.js PRIMERO para definir las funciones -->
     <script src="config.js"></script>
     <script src="app.js"></script>
-    <!-- Google API Scripts -->
+    
+    <!-- Google API Scripts - se cargan DESPUÉS -->
     <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-    <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+    <script src="https://apis.google.com/js/platform.js" onload="gisLoaded()"></script>
 </head>
 <body>
     <div class="container">
