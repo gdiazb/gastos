@@ -3,14 +3,19 @@
 // Estas funciones deben estar en el scope global ANTES de que se carguen los scripts
 window.gapiLoaded = function() {
     console.log('📡 GAPI script cargado');
-    gapi.load('client:auth2', initializeGapiClient);
+    gapi.load('client', initializeGapiClient);
 };
 
 window.gisLoaded = function() {
-    console.log('📡 Platform script cargado');
-    // Ya no usamos GIS, solo marcamos como cargado
+    console.log('📡 GIS script cargado');
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        scope: CONFIG.SCOPES,
+        callback: '', // Se define en handleAuthClick
+    });
     gisInited = true;
     maybeEnableButtons();
+    console.log('✅ GIS inicializado');
 };
 
 // ==================== ESTADO GLOBAL ====================
@@ -21,7 +26,6 @@ let currentUser = null;
 let gapiInited = false;
 let gisInited = false;
 let tokenClient;
-let auth2;
 
 // Speech Recognition API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -33,57 +37,16 @@ let isListening = false;
 async function initializeGapiClient() {
     console.log('🔧 Inicializando GAPI client...');
     try {
-        // Primero inicializar el client
         await gapi.client.init({
             discoveryDocs: CONFIG.DISCOVERY_DOCS,
         });
         
-        console.log('✅ GAPI client inicializado');
-        
-        // Luego inicializar auth2
-        await gapi.auth2.init({
-            client_id: CONFIG.GOOGLE_CLIENT_ID,
-            scope: CONFIG.SCOPES
-        });
-        
-        auth2 = gapi.auth2.getAuthInstance();
-        console.log('✅ Auth2 inicializado');
-        
         gapiInited = true;
-        
-        // Escuchar cambios en el estado de autenticación
-        auth2.isSignedIn.listen(updateSigninStatus);
-        
-        // Manejar el estado inicial
-        updateSigninStatus(auth2.isSignedIn.get());
-        
         maybeEnableButtons();
+        console.log('✅ GAPI client inicializado');
     } catch (error) {
         console.error('❌ Error inicializando GAPI client:', error);
-        console.error('Detalles del error:', JSON.stringify(error, null, 2));
-        showAlert('Error al inicializar Google API. Revisa la consola.', 'error');
-    }
-}
-
-function updateSigninStatus(isSignedIn) {
-    console.log('🔐 Estado de autenticación:', isSignedIn);
-    
-    if (isSignedIn) {
-        currentUser = auth2.currentUser.get();
-        document.getElementById('signoutBtn').style.display = 'block';
-        document.getElementById('authorizeBtn').style.display = 'none';
-        const syncNotice = document.getElementById('syncNotice');
-        if (syncNotice) syncNotice.style.display = 'none';
-        
-        // Cargar datos desde Google Sheets
-        loadDataFromGoogleSheets();
-        showAlert('¡Sesión iniciada correctamente!', 'success');
-    } else {
-        currentUser = null;
-        document.getElementById('signoutBtn').style.display = 'none';
-        document.getElementById('authorizeBtn').style.display = 'block';
-        const syncNotice = document.getElementById('syncNotice');
-        if (syncNotice) syncNotice.style.display = 'block';
+        showAlert('Error al inicializar Google API', 'error');
     }
 }
 
@@ -110,34 +73,68 @@ function maybeEnableButtons() {
 // ==================== AUTHENTICATION ====================
 
 function handleAuthClick() {
+    console.log('🔐 Intentando iniciar sesión...');
+    
     // Verificar que el API esté inicializado
-    if (!auth2) {
+    if (!tokenClient) {
         showAlert('Google API aún no está listo. Espera un momento e intenta de nuevo.', 'warning');
-        console.error('auth2 no está inicializado');
+        console.error('❌ tokenClient no está inicializado');
         return;
     }
 
-    auth2.signIn().then(function() {
-        console.log('Usuario autenticado exitosamente');
-    }).catch(function(error) {
-        console.error('Error en autenticación:', error);
-        if (error.error === 'popup_closed_by_user') {
-            showAlert('Ventana de autenticación cerrada', 'info');
-        } else {
-            showAlert('Error al iniciar sesión: ' + (error.error || 'Desconocido'), 'error');
+    tokenClient.callback = async (resp) => {
+        console.log('📩 Respuesta de autenticación recibida:', resp);
+        
+        if (resp.error !== undefined) {
+            console.error('❌ Error en autenticación:', resp);
+            showAlert('Error al iniciar sesión: ' + resp.error, 'error');
+            return;
         }
-    });
+        
+        console.log('✅ Token recibido exitosamente');
+        
+        // Actualizar UI
+        document.getElementById('signoutBtn').style.display = 'block';
+        document.getElementById('authorizeBtn').style.display = 'none';
+        const syncNotice = document.getElementById('syncNotice');
+        if (syncNotice) syncNotice.style.display = 'none';
+        
+        // Cargar datos desde Google Sheets
+        await loadDataFromGoogleSheets();
+        showAlert('¡Sesión iniciada correctamente!', 'success');
+    };
+
+    // Verificar si ya hay un token
+    if (gapi.client.getToken() === null) {
+        console.log('🔑 Solicitando nuevo token...');
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+        console.log('🔑 Renovando token existente...');
+        tokenClient.requestAccessToken({ prompt: '' });
+    }
 }
 
 function handleSignoutClick() {
-    if (auth2) {
-        auth2.signOut().then(function() {
-            console.log('Usuario desconectado');
-            expenses = [];
-            refreshUI();
-            showAlert('Sesión cerrada', 'info');
+    console.log('👋 Cerrando sesión...');
+    
+    const token = gapi.client.getToken();
+    if (token !== null) {
+        google.accounts.oauth2.revoke(token.access_token, () => {
+            console.log('✅ Token revocado');
         });
+        gapi.client.setToken('');
     }
+    
+    // Actualizar UI
+    document.getElementById('signoutBtn').style.display = 'none';
+    document.getElementById('authorizeBtn').style.display = 'block';
+    const syncNotice = document.getElementById('syncNotice');
+    if (syncNotice) syncNotice.style.display = 'block';
+    
+    // Limpiar datos
+    expenses = [];
+    refreshUI();
+    showAlert('Sesión cerrada', 'info');
 }
 
 // ==================== GOOGLE SHEETS OPERATIONS ====================
@@ -274,7 +271,7 @@ async function addExpense(expenseData) {
     saveDataToLocalStorage();
     
     // Si está autenticado, guardar también en Google Sheets
-    if (auth2 && auth2.isSignedIn.get()) {
+    if (gapi.client.getToken() !== null) {
         await saveExpenseToGoogleSheets(expense);
     }
     
@@ -290,7 +287,7 @@ async function deleteExpense(expenseId) {
     saveDataToLocalStorage();
     
     // Si está autenticado, eliminar también de Google Sheets
-    if (auth2 && auth2.isSignedIn.get()) {
+    if (gapi.client.getToken() !== null) {
         await deleteExpenseFromGoogleSheets(expenseId);
     }
     
