@@ -1,0 +1,29 @@
+# No subir archivos con credenciales
+*.key
+*.pem
+*.p8
+credentials.json
+.env
+.env.local
+
+# Node modules (si usas npm)
+node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.cache/
+dist/
