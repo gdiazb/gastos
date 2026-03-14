@@ -10,6 +10,7 @@ window.gisLoaded = function() {
         client_id: CONFIG.GOOGLE_CLIENT_ID,
         scope: CONFIG.SCOPES,
         callback: '', // Se define después
+        ux_mode: 'popup', // Usar popup en lugar de redirect
     });
     gisInited = true;
     maybeEnableButtons();
