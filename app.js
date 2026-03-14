@@ -321,9 +321,8 @@ function cancelVoiceConfirmation() {
 
 function addVoiceExpenses(items) {
     const today = new Date().toISOString().split('T')[0];
-    const token = localStorage.getItem('googleIdToken');
     
-    items.forEach(item => {
+    items.forEach(async (item) => {
         const expense = {
             date: today,
             category: guessCategory(item.concept),
@@ -335,15 +334,11 @@ function addVoiceExpenses(items) {
         
         expenses.unshift(expense);
         
-        // Intentar escribir en Google Sheets si hay token
-        if (token && currentUser) {
-            try {
-                writeToGoogleSheets(expense, token).catch(error => {
-                    console.warn('No se pudo sincronizar con Sheets', error);
-                });
-            } catch (error) {
-                console.warn('Error al intentar escribir en Sheets', error);
-            }
+        // Intentar escribir en Google Sheets usando Apps Script
+        try {
+            await writeToGoogleSheets(expense);
+        } catch (error) {
+            console.warn('Error al sincronizar gasto de voz:', error);
         }
     });
 
@@ -393,54 +388,76 @@ function initializeGoogleSignIn() {
     
     if (!clientId || clientId === "TU_CLIENT_ID.apps.googleusercontent.com") {
         console.warn("⚠️ CONFIGURACIÓN: Falta configurar GOOGLE_CLIENT_ID en config.js");
-        showAlert("Debes configurar tu Google Client ID en config.js", "error");
+        showAlert("⚠️ Configura tu GOOGLE_CLIENT_ID en config.js", "error");
         return;
     }
 
     try {
+        console.log('Inicializando Google Accounts con Client ID:', clientId);
+        
         window.google.accounts.id.initialize({
             client_id: clientId,
-            callback: handleCredentialResponse
+            callback: handleCredentialResponse,
+            ux_mode: 'popup'
         });
 
-        window.google.accounts.id.renderButton(
-            document.getElementById('buttonDiv'),
-            {
+        // Renderizar botón
+        const buttonDiv = document.getElementById('buttonDiv');
+        if (buttonDiv) {
+            window.google.accounts.id.renderButton(buttonDiv, {
                 theme: 'outline',
                 size: 'large',
                 text: 'signin_with'
-            }
-        );
-        
-        console.log('✅ Google Sign-In inicializado correctamente');
+            });
+            console.log('✅ Botón de Google Sign-In renderizado');
+        } else {
+            console.error('❌ No se encontró elemento #buttonDiv');
+        }
     } catch (error) {
-        console.error('Error inicializando Google Sign-In:', error);
-        showAlert('Error al cargar Google Sign-In', 'error');
+        console.error('❌ Error inicializando Google Sign-In:', error);
+        showAlert('Error al cargar Google Sign-In: ' + error.message, 'error');
     }
 }
 
 function handleCredentialResponse(response) {
-    // Decodificar JWT token
-    const base64Url = response.credential.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(
-        atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
-    );
-    
-    const user = JSON.parse(jsonPayload);
-    currentUser = user.email;
-    
-    // GUARDAR el token en localStorage para usarlo después
-    localStorage.setItem('googleIdToken', response.credential);
-    
-    document.getElementById('userEmail').textContent = currentUser;
-    document.getElementById('signoutBtn').style.display = 'inline-block';
-    document.getElementById('buttonDiv').style.display = 'none';
+    try {
+        console.log('✅ Respuesta de Google recibida');
+        
+        if (!response.credential) {
+            console.error('❌ No hay credential en la respuesta');
+            showAlert('Error: No se recibió credencial de Google', 'error');
+            return;
+        }
 
-    // Inicializar API después de autenticarse
-    initializeGoogleAPI(response.credential);
-    
-    showAlert(`✅ Bienvenido ${currentUser}`, 'success');
+        // Decodificar JWT token
+        const base64Url = response.credential.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(
+            atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+        );
+        
+        const user = JSON.parse(jsonPayload);
+        currentUser = user.email;
+        
+        console.log('👤 Usuario:', currentUser);
+        
+        // GUARDAR el token en localStorage para usarlo después
+        localStorage.setItem('googleIdToken', response.credential);
+        console.log('💾 Token guardado en localStorage');
+        
+        document.getElementById('userEmail').textContent = currentUser;
+        document.getElementById('signoutBtn').style.display = 'inline-block';
+        document.getElementById('buttonDiv').style.display = 'none';
+
+        // Inicializar API después de autenticarse
+        initializeGoogleAPI(response.credential);
+        
+        showAlert(`✅ Bienvenido ${currentUser}`, 'success');
+        console.log('✅ Sesión iniciada correctamente');
+    } catch (error) {
+        console.error('❌ Error en handleCredentialResponse:', error);
+        showAlert('Error al procesar credencial de Google: ' + error.message, 'error');
+    }
 }
 
 function initializeGoogleAPI(token) {
@@ -474,49 +491,43 @@ if (signoutBtn) {
 
 // ==================== GOOGLE SHEETS API ====================
 
-// Función para escribir en Google Sheets
-async function writeToGoogleSheets(expense, token) {
+// Función para escribir en Google Sheets a través de Apps Script
+async function writeToGoogleSheets(expense) {
     try {
-        if (!CONFIG.SPREADSHEET_ID || CONFIG.SPREADSHEET_ID === "TU_ID_AQUI") {
-            console.warn("SPREADSHEET_ID no configurado, guardando solo en localStorage");
+        if (!expense) {
+            console.warn("No hay gasto para escribir");
             return false;
         }
 
-        // Preparar datos para escribir
-        const values = [[
-            expense.date,
-            expense.category,
-            expense.description,
-            expense.amount,
-            expense.paidBy,
-            expense.id
-        ]];
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxIOq45kieujHT_dgKhLJWpjMxsjzzB--fAqEwjLOF0GfDdELP2fM0Gq8sg-gmRGuycXQ/exec";
 
-        // Usar Google Sheets API para agregar la fila
-        const response = await fetch(
-            `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.SHEET_NAME}!A:F:append?valueInputOption=RAW&key=${CONFIG.GOOGLE_API_KEY || ''}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    values: values
-                })
-            }
-        );
+        // Enviar datos al Apps Script
+        const response = await fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                date: expense.date,
+                category: expense.category,
+                description: expense.description,
+                amount: expense.amount,
+                paidBy: expense.paidBy,
+                id: expense.id
+            })
+        });
 
-        if (response.ok) {
-            console.log('✅ Gasto escrito en Google Sheets');
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log('✅ Gasto escrito en Google Sheets:', result.message);
             return true;
         } else {
-            const error = await response.text();
-            console.warn('Error escribiendo en Google Sheets:', error);
+            console.warn('⚠️ Error en Apps Script:', result.message);
             return false;
         }
     } catch (error) {
-        console.error('Error escribiendo en Sheets:', error);
+        console.error('❌ Error escribiendo en Sheets:', error);
         return false;
     }
 }
@@ -625,25 +636,20 @@ document.getElementById('expenseForm').addEventListener('submit', async (e) => {
         id: Date.now().toString()
     };
 
-    expenses.unshift(expense); // Agregar al inicio
+    expenses.unshift(expense);
     saveDataToLocalStorage();
     
-    // Intentar escribir en Google Sheets si hay token
-    const token = localStorage.getItem('googleIdToken');
-    if (token && currentUser) {
-        try {
-            const success = await writeToGoogleSheets(expense, token);
-            if (success) {
-                showAlert('✅ Gasto guardado en Google Sheets', 'success');
-            } else {
-                showAlert('⚠️ Gasto guardado localmente (no se sincronizó)', 'warning');
-            }
-        } catch (error) {
-            console.warn('Error sincronizando con Sheets:', error);
-            showAlert('⚠️ Gasto guardado localmente', 'warning');
+    // Intentar escribir en Google Sheets usando Apps Script
+    try {
+        const success = await writeToGoogleSheets(expense);
+        if (success) {
+            showAlert('✅ Gasto guardado localmente y en Google Sheets', 'success');
+        } else {
+            showAlert('✅ Gasto guardado localmente (Sheets pendiente)', 'success');
         }
-    } else {
-        showAlert('✅ Gasto agregado (inicia sesión para sincronizar)', 'success');
+    } catch (error) {
+        console.warn('Error al sincronizar:', error);
+        showAlert('✅ Gasto guardado localmente', 'success');
     }
     
     refreshUI();
