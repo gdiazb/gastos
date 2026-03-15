@@ -1,7 +1,7 @@
 // ==================== ESTADO GLOBAL ====================
 
 let expenses = [];
-let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz7rronJfOTccp4XGW0S9tHLqjVo8Lc9E5D5QCpiUlB9iRhjkXrzSNKBQ7VCVGaPfM/exec';
+let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxO3IXmL9GOYX8IxWfySiqM5UlrUTmfj6x-XfndiZCJYfteznRUEZP6ZSc4-jNRSdML/exec';
 
 // Speech Recognition API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
