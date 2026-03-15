@@ -1,7 +1,7 @@
 // ==================== ESTADO GLOBAL ====================
 
 let expenses = [];
-let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxO3IXmL9GOYX8IxWfySiqM5UlrUTmfj6x-XfndiZCJYfteznRUEZP6ZSc4-jNRSdML/exec';
+let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz7rronJfOTccp4XGW0S9tHLqjVo8Lc9E5D5QCpiUlB9iRhjkXrzSNKBQ7VCVGaPfM/exec';
 
 // Speech Recognition API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -11,16 +11,49 @@ let isListening = false;
 // ==================== GOOGLE APPS SCRIPT API (JSONP para evitar CORS) ====================
 
 // Helper para hacer peticiones JSONP (evita CORS)
-function jsonp(url, callback) {
+function jsonp(url, callback, errorCallback) {
     const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
+    let finished = false;
+    
+    // Timeout de 15 segundos
+    const timeout = setTimeout(() => {
+        if (!finished) {
+            finished = true;
+            cleanup();
+            if (errorCallback) {
+                errorCallback(new Error('Timeout: La petición tardó demasiado'));
+            }
+        }
+    }, 15000);
+    
     window[callbackName] = function(data) {
-        delete window[callbackName];
-        document.body.removeChild(script);
-        callback(data);
+        if (!finished) {
+            finished = true;
+            clearTimeout(timeout);
+            cleanup();
+            callback(data);
+        }
     };
+    
+    function cleanup() {
+        delete window[callbackName];
+        if (script && script.parentNode) {
+            document.body.removeChild(script);
+        }
+    }
 
     const script = document.createElement('script');
     script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + callbackName;
+    script.onerror = function() {
+        if (!finished) {
+            finished = true;
+            clearTimeout(timeout);
+            cleanup();
+            if (errorCallback) {
+                errorCallback(new Error('Error cargando el script'));
+            }
+        }
+    };
     document.body.appendChild(script);
 }
 
@@ -30,10 +63,9 @@ async function loadDataFromGoogleSheets() {
         return;
     }
     
+    showLoading(true);
+    
     try {
-        showLoading(true);
-        
-        // Usar JSONP en lugar de fetch para evitar CORS
         const url = `${APPS_SCRIPT_URL}?action=getAll`;
         
         jsonp(url, function(result) {
@@ -41,16 +73,24 @@ async function loadDataFromGoogleSheets() {
                 expenses = result.data || [];
                 saveDataToLocalStorage();
                 refreshUI();
-                showAlert(`${expenses.length} gastos cargados desde Google Sheets`, 'success');
+                if (expenses.length > 0) {
+                    showAlert(`${expenses.length} gastos cargados desde Google Sheets`, 'success');
+                }
             } else {
                 throw new Error(result.error || 'Error desconocido');
             }
+            showLoading(false);
+        }, function(error) {
+            // Error callback
+            console.error('Error cargando datos:', error);
+            showAlert('Error al cargar de Google Sheets. Usando datos locales.', 'warning');
+            loadDataFromLocalStorage();
             showLoading(false);
         });
         
     } catch (error) {
         console.error('Error cargando datos:', error);
-        showAlert('Error al cargar datos de Google Sheets. Usando datos locales.', 'warning');
+        showAlert('Error al cargar de Google Sheets. Usando datos locales.', 'warning');
         loadDataFromLocalStorage();
         showLoading(false);
     }
@@ -62,9 +102,9 @@ async function saveExpenseToGoogleSheets(expense) {
         return;
     }
     
+    showLoading(true);
+    
     try {
-        showLoading(true);
-        
         const url = `${APPS_SCRIPT_URL}?action=add&expense=${encodeURIComponent(JSON.stringify(expense))}`;
         
         jsonp(url, function(result) {
@@ -73,6 +113,10 @@ async function saveExpenseToGoogleSheets(expense) {
             } else {
                 throw new Error(result.error || 'Error desconocido');
             }
+            showLoading(false);
+        }, function(error) {
+            console.error('Error guardando gasto:', error);
+            showAlert('Error al guardar en Google Sheets. Guardado solo localmente.', 'warning');
             showLoading(false);
         });
         
@@ -89,9 +133,9 @@ async function deleteExpenseFromGoogleSheets(expenseId) {
         return;
     }
     
+    showLoading(true);
+    
     try {
-        showLoading(true);
-        
         const url = `${APPS_SCRIPT_URL}?action=delete&id=${encodeURIComponent(expenseId)}`;
         
         jsonp(url, function(result) {
@@ -100,6 +144,10 @@ async function deleteExpenseFromGoogleSheets(expenseId) {
             } else {
                 throw new Error(result.error || 'Error desconocido');
             }
+            showLoading(false);
+        }, function(error) {
+            console.error('Error eliminando gasto:', error);
+            showAlert('Error al eliminar de Google Sheets', 'error');
             showLoading(false);
         });
         
