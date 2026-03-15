@@ -1,169 +1,35 @@
-// ==================== GOOGLE API CALLBACKS (DEBEN ESTAR PRIMERO) ====================
-
-// Estas funciones deben estar en el scope global ANTES de que se carguen los scripts
-window.gapiLoaded = function() {
-    console.log('📡 GAPI script cargado');
-    gapi.load('client', initializeGapiClient);
-};
-
-window.gisLoaded = function() {
-    console.log('📡 GIS script cargado');
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: CONFIG.SCOPES,
-        callback: '', // Se define en handleAuthClick
-    });
-    gisInited = true;
-    maybeEnableButtons();
-    console.log('✅ GIS inicializado');
-};
-
 // ==================== ESTADO GLOBAL ====================
 
-// Estado global
 let expenses = [];
-let currentUser = null;
-let gapiInited = false;
-let gisInited = false;
-let tokenClient;
+let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxxmkR7Lo0aju0rCyFgGtV-VAjGCev6CezET1TbNn9edENfCp3_-cqfghx63F3mcP8K/exec'; // Se configurará después del deployment
 
 // Speech Recognition API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let isListening = false;
 
-// ==================== GOOGLE API INITIALIZATION ====================
-
-async function initializeGapiClient() {
-    console.log('🔧 Inicializando GAPI client...');
-    try {
-        await gapi.client.init({
-            discoveryDocs: CONFIG.DISCOVERY_DOCS,
-        });
-        
-        gapiInited = true;
-        maybeEnableButtons();
-        console.log('✅ GAPI client inicializado');
-    } catch (error) {
-        console.error('❌ Error inicializando GAPI client:', error);
-        showAlert('Error al inicializar Google API', 'error');
-    }
-}
-
-function maybeEnableButtons() {
-    const authorizeBtn = document.getElementById('authorizeBtn');
-    
-    if (gapiInited && gisInited) {
-        console.log('✅ Google API inicializado correctamente');
-        if (authorizeBtn) {
-            authorizeBtn.disabled = false;
-            authorizeBtn.style.opacity = '1';
-            authorizeBtn.style.cursor = 'pointer';
-        }
-    } else {
-        console.log('⏳ Esperando inicialización de Google API...', {gapiInited, gisInited});
-        if (authorizeBtn) {
-            authorizeBtn.disabled = true;
-            authorizeBtn.style.opacity = '0.5';
-            authorizeBtn.style.cursor = 'not-allowed';
-        }
-    }
-}
-
-// ==================== AUTHENTICATION ====================
-
-function handleAuthClick() {
-    console.log('🔐 Intentando iniciar sesión...');
-    
-    // Verificar que el API esté inicializado
-    if (!tokenClient) {
-        showAlert('Google API aún no está listo. Espera un momento e intenta de nuevo.', 'warning');
-        console.error('❌ tokenClient no está inicializado');
-        return;
-    }
-
-    tokenClient.callback = async (resp) => {
-        console.log('📩 Respuesta de autenticación recibida:', resp);
-        
-        if (resp.error !== undefined) {
-            console.error('❌ Error en autenticación:', resp);
-            showAlert('Error al iniciar sesión: ' + resp.error, 'error');
-            return;
-        }
-        
-        console.log('✅ Token recibido exitosamente');
-        
-        // Actualizar UI
-        document.getElementById('signoutBtn').style.display = 'block';
-        document.getElementById('authorizeBtn').style.display = 'none';
-        const syncNotice = document.getElementById('syncNotice');
-        if (syncNotice) syncNotice.style.display = 'none';
-        
-        // Cargar datos desde Google Sheets
-        await loadDataFromGoogleSheets();
-        showAlert('¡Sesión iniciada correctamente!', 'success');
-    };
-
-    // Verificar si ya hay un token
-    if (gapi.client.getToken() === null) {
-        console.log('🔑 Solicitando nuevo token...');
-        tokenClient.requestAccessToken({ prompt: 'consent' });
-    } else {
-        console.log('🔑 Renovando token existente...');
-        tokenClient.requestAccessToken({ prompt: '' });
-    }
-}
-
-function handleSignoutClick() {
-    console.log('👋 Cerrando sesión...');
-    
-    const token = gapi.client.getToken();
-    if (token !== null) {
-        google.accounts.oauth2.revoke(token.access_token, () => {
-            console.log('✅ Token revocado');
-        });
-        gapi.client.setToken('');
-    }
-    
-    // Actualizar UI
-    document.getElementById('signoutBtn').style.display = 'none';
-    document.getElementById('authorizeBtn').style.display = 'block';
-    const syncNotice = document.getElementById('syncNotice');
-    if (syncNotice) syncNotice.style.display = 'block';
-    
-    // Limpiar datos
-    expenses = [];
-    refreshUI();
-    showAlert('Sesión cerrada', 'info');
-}
-
-// ==================== GOOGLE SHEETS OPERATIONS ====================
+// ==================== GOOGLE APPS SCRIPT API ====================
 
 async function loadDataFromGoogleSheets() {
+    if (!APPS_SCRIPT_URL) {
+        console.log('⚠️ Apps Script URL no configurada, usando solo localStorage');
+        return;
+    }
+    
     try {
         showLoading(true);
         
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'A2:F', // Desde la fila 2 hasta el final (saltando encabezados)
-        });
-
-        const rows = response.result.values || [];
+        const response = await fetch(`${APPS_SCRIPT_URL}?action=getAll`);
+        const result = await response.json();
         
-        expenses = rows.map(row => ({
-            date: row[0] || '',
-            category: row[1] || '',
-            description: row[2] || '',
-            amount: parseFloat(row[3]) || 0,
-            paidBy: row[4] || '',
-            id: row[5] || generateId()
-        }));
-
-        // También guardar en localStorage como respaldo
-        saveDataToLocalStorage();
-        refreshUI();
-        
-        showAlert(`${expenses.length} gastos cargados desde Google Sheets`, 'success');
+        if (result.success) {
+            expenses = result.data || [];
+            saveDataToLocalStorage();
+            refreshUI();
+            showAlert(`${expenses.length} gastos cargados desde Google Sheets`, 'success');
+        } else {
+            throw new Error(result.error || 'Error desconocido');
+        }
     } catch (error) {
         console.error('Error cargando datos:', error);
         showAlert('Error al cargar datos de Google Sheets. Usando datos locales.', 'warning');
@@ -174,26 +40,23 @@ async function loadDataFromGoogleSheets() {
 }
 
 async function saveExpenseToGoogleSheets(expense) {
+    if (!APPS_SCRIPT_URL) {
+        console.log('⚠️ Apps Script URL no configurada');
+        return;
+    }
+    
     try {
         showLoading(true);
         
-        const values = [[
-            expense.date,
-            expense.category,
-            expense.description,
-            expense.amount,
-            expense.paidBy,
-            expense.id
-        ]];
-
-        await gapi.client.sheets.spreadsheets.values.append({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'A2:F',
-            valueInputOption: 'USER_ENTERED',
-            resource: { values }
-        });
-
-        showAlert('Gasto guardado exitosamente', 'success');
+        const url = `${APPS_SCRIPT_URL}?action=add&expense=${encodeURIComponent(JSON.stringify(expense))}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert('Gasto guardado exitosamente', 'success');
+        } else {
+            throw new Error(result.error || 'Error desconocido');
+        }
     } catch (error) {
         console.error('Error guardando gasto:', error);
         showAlert('Error al guardar en Google Sheets. Guardado solo localmente.', 'warning');
@@ -203,38 +66,22 @@ async function saveExpenseToGoogleSheets(expense) {
 }
 
 async function deleteExpenseFromGoogleSheets(expenseId) {
+    if (!APPS_SCRIPT_URL) {
+        console.log('⚠️ Apps Script URL no configurada');
+        return;
+    }
+    
     try {
         showLoading(true);
         
-        // Primero, obtener todos los datos para encontrar la fila
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'A2:F',
-        });
-
-        const rows = response.result.values || [];
-        const rowIndex = rows.findIndex(row => row[5] === expenseId);
-
-        if (rowIndex !== -1) {
-            const actualRowNumber = rowIndex + 2; // +2 porque empezamos en A2
-            
-            await gapi.client.sheets.spreadsheets.batchUpdate({
-                spreadsheetId: CONFIG.SPREADSHEET_ID,
-                resource: {
-                    requests: [{
-                        deleteDimension: {
-                            range: {
-                                sheetId: 0,
-                                dimension: 'ROWS',
-                                startIndex: actualRowNumber - 1,
-                                endIndex: actualRowNumber
-                            }
-                        }
-                    }]
-                }
-            });
-
+        const url = `${APPS_SCRIPT_URL}?action=delete&id=${encodeURIComponent(expenseId)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        
+        if (result.success) {
             showAlert('Gasto eliminado exitosamente', 'success');
+        } else {
+            throw new Error(result.error || 'Error desconocido');
         }
     } catch (error) {
         console.error('Error eliminando gasto:', error);
@@ -270,10 +117,8 @@ async function addExpense(expenseData) {
     expenses.unshift(expense);
     saveDataToLocalStorage();
     
-    // Si está autenticado, guardar también en Google Sheets
-    if (gapi.client.getToken() !== null) {
-        await saveExpenseToGoogleSheets(expense);
-    }
+    // Guardar en Google Sheets
+    await saveExpenseToGoogleSheets(expense);
     
     refreshUI();
 }
@@ -286,10 +131,8 @@ async function deleteExpense(expenseId) {
     expenses = expenses.filter(e => e.id !== expenseId);
     saveDataToLocalStorage();
     
-    // Si está autenticado, eliminar también de Google Sheets
-    if (gapi.client.getToken() !== null) {
-        await deleteExpenseFromGoogleSheets(expenseId);
-    }
+    // Eliminar de Google Sheets
+    await deleteExpenseFromGoogleSheets(expenseId);
     
     refreshUI();
 }
@@ -905,10 +748,17 @@ if (!document.getElementById('alert-animations')) {
 
 // Inicializar cuando carga la página
 window.addEventListener('load', () => {
-    console.log('🚀 Iniciando Finan-Zas...');
+    console.log('🚀 Iniciando Finan-Zas (Apps Script version)...');
     
     // Cargar datos locales primero
     loadDataFromLocalStorage();
+    
+    // Intentar cargar desde Google Sheets
+    if (APPS_SCRIPT_URL) {
+        loadDataFromGoogleSheets();
+    } else {
+        showAlert('⚠️ Configura APPS_SCRIPT_URL para sincronizar con Google Sheets', 'warning');
+    }
     
     // Inicializar fecha de hoy
     const dateInput = document.getElementById('date');
@@ -922,15 +772,6 @@ window.addEventListener('load', () => {
     
     // Inicializar reconocimiento de voz
     initializeSpeechRecognition();
-    
-    // Configurar botón de sign out
-    const signoutBtn = document.getElementById('signoutBtn');
-    if (signoutBtn) {
-        signoutBtn.addEventListener('click', handleSignoutClick);
-    }
-    
-    // Intentar habilitar botones (por si los APIs ya están listos)
-    maybeEnableButtons();
     
     console.log('✅ Finan-Zas inicializado');
 });

@@ -14,13 +14,8 @@
     
     <link rel="stylesheet" href="style.css">
     
-    <!-- Cargar config y app.js PRIMERO para definir las funciones -->
-    <script src="config.js"></script>
+    <!-- Apps Script Version - NO requiere OAuth -->
     <script src="app.js"></script>
-    
-    <!-- Google API Scripts - se cargan DESPUÉS -->
-    <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-    <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </head>
 <body>
     <div class="container">
@@ -28,17 +23,10 @@
         <header class="header">
             <div class="header-content">
                 <h1 class="title">💰 Finan-Zas</h1>
-                <div class="auth-section">
-                    <button id="authorizeBtn" class="btn-signin" onclick="handleAuthClick()" disabled style="opacity: 0.5;">
-                        🔐 Iniciar Sesión con Google
-                    </button>
-                    <button id="signoutBtn" class="btn-signout" style="display:none;">
-                        Cerrar sesión
-                    </button>
+                <div class="sync-status" id="syncStatus">
+                    <span class="sync-icon">🔄</span>
+                    <span class="sync-text">Sincronizado con Google Sheets</span>
                 </div>
-            </div>
-            <div class="sync-notice" id="syncNotice">
-                <p>⚠️ Inicia sesión con Google para sincronizar tus gastos en todos tus dispositivos</p>
             </div>
         </header>
 
